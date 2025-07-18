@@ -24,6 +24,7 @@ import hashlib
 # Optional imports - these may not be available in all environments
 try:
     from huggingface_hub import hf_hub_download, list_repo_files
+
     HF_AVAILABLE = True
     print("✓ huggingface_hub available")
 except ImportError:
@@ -32,14 +33,20 @@ except ImportError:
 
 try:
     from datasets import load_dataset
+
     DATASETS_AVAILABLE = True
     print("✓ datasets available")
 except ImportError:
     DATASETS_AVAILABLE = False
     print("✗ datasets not available. Install with: pip install datasets")
 
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
 def hash_image_bytes(image_bytes: bytes) -> str:
     return hashlib.sha256(image_bytes).hexdigest()
+
 
 class ExtractImageProcessor:
     """
@@ -56,19 +63,21 @@ class ExtractImageProcessor:
         """
         self.cache_dir = cache_dir or Path.home() / ".cache" / "image_processor"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Output directory for saving .pt files
         self.output_dir = Path(__file__).parent  # bitmind/cache/datasets
-        
+
         # Default tensor configuration
         self.default_tensor_config = {
             "dtype": torch.float32,
-            "normalize": True,  # Normalize to [0, 1]
+            "normalize": False,  # Normalize to [0, 1]
             "channels_first": True,  # (C, H, W) format
             "resize": None,  # Optional resize (width, height)
         }
 
-    def list_parquet_files(self, dataset_path: str, repo_type: str = "dataset") -> List[str]:
+    def list_parquet_files(
+        self, dataset_path: str, repo_type: str = "dataset"
+    ) -> List[str]:
         """
         List all available parquet files in a Hugging Face dataset.
 
@@ -80,28 +89,30 @@ class ExtractImageProcessor:
             List of parquet filenames
         """
         if not HF_AVAILABLE:
-            raise ImportError("huggingface_hub is required. Install with: pip install huggingface_hub")
-            
+            raise ImportError(
+                "huggingface_hub is required. Install with: pip install huggingface_hub"
+            )
+
         try:
             print(f"Listing files in {dataset_path}...")
             files = list_repo_files(repo_id=dataset_path, repo_type=repo_type)
-            parquet_files = [f for f in files if f.endswith('.parquet')]
-            
+            parquet_files = [f for f in files if f.endswith(".parquet")]
+
             if not parquet_files:
                 raise ValueError(f"No parquet files found in {dataset_path}")
-            
+
             print(f"Found {len(parquet_files)} parquet files")
             return parquet_files
-            
+
         except Exception as e:
             print(f"✗ Error listing files in {dataset_path}: {e}")
             raise
 
     async def download_parquet_from_hf(
-        self, 
-        dataset_path: str, 
+        self,
+        dataset_path: str,
         filename: Optional[str] = None,
-        repo_type: str = "dataset"
+        repo_type: str = "dataset",
     ) -> Path:
         """
         Download a parquet file from Hugging Face dataset.
@@ -115,8 +126,10 @@ class ExtractImageProcessor:
             Path to the downloaded parquet file
         """
         if not HF_AVAILABLE:
-            raise ImportError("huggingface_hub is required. Install with: pip install huggingface_hub")
-            
+            raise ImportError(
+                "huggingface_hub is required. Install with: pip install huggingface_hub"
+            )
+
         try:
             # Create dataset-specific cache directory
             dataset_name = dataset_path.split("/")[-1]
@@ -130,7 +143,11 @@ class ExtractImageProcessor:
                 print(f"Selected random parquet file: {filename}")
 
             # Check if file already exists
-            local_path = dataset_cache_dir / str(filename) if filename else dataset_cache_dir / "data.parquet"
+            local_path = (
+                dataset_cache_dir / str(filename)
+                if filename
+                else dataset_cache_dir / "data.parquet"
+            )
             if local_path.exists():
                 print(f"Parquet file already exists: {local_path}")
                 return local_path
@@ -142,9 +159,9 @@ class ExtractImageProcessor:
                 filename=filename,
                 repo_type=repo_type,
                 cache_dir=str(dataset_cache_dir),
-                local_dir=str(dataset_cache_dir)
+                local_dir=str(dataset_cache_dir),
             )
-            
+
             print(f"✓ Successfully downloaded: {downloaded_path}")
             return Path(downloaded_path)
 
@@ -165,15 +182,15 @@ class ExtractImageProcessor:
         """
         try:
             print(f"Loading parquet data from: {parquet_path}")
-            
+
             # Read parquet file
             table = pq.read_table(parquet_path)
             df = table.to_pandas()
-            
+
             print(f"✓ Loaded {len(df)} rows from parquet file")
             print(f"Columns: {list(df.columns)}")
             return df
-            
+
         except Exception as e:
             print(f"✗ Error loading parquet data: {e}")
             print(traceback.format_exc())
@@ -190,14 +207,22 @@ class ExtractImageProcessor:
             Name of the image column
         """
         # Look for common image column names
-        image_keywords = ['image', 'img', 'photo', 'picture', 'data', 'bytes', 'content']
-        
+        image_keywords = [
+            "image",
+            "img",
+            "photo",
+            "picture",
+            "data",
+            "bytes",
+            "content",
+        ]
+
         for col in df.columns:
             col_lower = col.lower()
             if any(keyword in col_lower for keyword in image_keywords):
                 print(f"Found image column: {col}")
                 return col
-        
+
         # If no obvious image column found, return the first column
         print(f"⚠ No obvious image column found, using first column: {df.columns[0]}")
         return df.columns[0]
@@ -221,10 +246,10 @@ class ExtractImageProcessor:
                     return base64.b64decode(row_data)
                 except Exception:
                     # If not base64, try to encode as bytes
-                    return row_data.encode('utf-8')
+                    return row_data.encode("utf-8")
             elif isinstance(row_data, dict):
                 # Look for image data in dictionary
-                for key in ['bytes', 'data', 'image', 'content']:
+                for key in ["bytes", "data", "image", "content"]:
                     if key in row_data:
                         return self.extract_image_from_row(row_data[key])
                 # If no obvious key, try the first value
@@ -233,15 +258,13 @@ class ExtractImageProcessor:
             else:
                 # Try to convert to bytes
                 return bytes(row_data)
-                
+
         except Exception as e:
             print(f"⚠ Failed to extract image from row data: {e}")
             return None
 
     def image_to_tensor(
-        self, 
-        image_bytes: bytes, 
-        config: Optional[Dict[str, Any]] = None
+        self, image_bytes: bytes, config: Optional[Dict[str, Any]] = None, device: torch.device = device
     ) -> torch.Tensor:
         """
         Convert image bytes to tensor.
@@ -254,40 +277,43 @@ class ExtractImageProcessor:
             Image tensor
         """
         config = config or self.default_tensor_config
-        
+
         try:
             # Load image from bytes
             image = Image.open(BytesIO(image_bytes))
-            
+
             # Convert to RGB if necessary
-            if image.mode != 'RGB':
-                image = image.convert('RGB')
-            
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+
             # Resize if specified
-            if config.get('resize'):
-                width, height = config['resize']
+            if config.get("resize"):
+                width, height = config["resize"]
                 image = image.resize((width, height), Image.Resampling.LANCZOS)
-            
+
             # Convert to numpy array
             image_array = np.array(image)
-            
+
             # Normalize to [0, 1] if requested
-            if config.get('normalize', True):
+            if config.get("normalize", True):
                 image_array = image_array.astype(np.float32) / 255.0
-            
+
             # Convert to tensor
             tensor = torch.from_numpy(image_array)
-            
+
             # Change format if requested
-            if config.get('channels_first', True):
+            if config.get("channels_first", True):
                 # Convert from (H, W, C) to (C, H, W)
                 tensor = tensor.permute(2, 0, 1)
-            
+
             # Set dtype
-            tensor = tensor.to(config.get('dtype', torch.float32))
-            
+            tensor = tensor.to(config.get("dtype", torch.float32))
+
+            # Move to device (CUDA or CPU)
+            tensor = tensor.to(device)
+
             return tensor
-            
+
         except Exception as e:
             print(f"✗ Error converting image to tensor: {e}")
             raise
@@ -298,7 +324,8 @@ class ExtractImageProcessor:
         num_images: int = 10,
         seed: Optional[int] = None,
         tensor_config: Optional[Dict[str, Any]] = None,
-        save_metadata: bool = True
+        save_metadata: bool = True,
+        device: torch.device = device,
     ) -> Tuple[List[torch.Tensor], List[Dict[str, Any]]]:
         """
         Extract images from parquet file and convert to tensors.
@@ -318,36 +345,36 @@ class ExtractImageProcessor:
             if seed is not None:
                 random.seed(seed)
                 np.random.seed(seed)
-            
+
             # Load parquet data
             df = self.load_parquet_data(parquet_path)
-            
+
             # Find image column
             image_col = self.find_image_column(df)
-            
+
             # Sample random rows
             sample_size = min(num_images, len(df))
             sample_df = df.sample(n=sample_size, random_state=seed)
-            
+
             tensors = []
             metadata_list = []
-            
+
             print(f"Extracting {sample_size} images...")
-            
+
             for idx, (row_idx, row) in enumerate(sample_df.iterrows()):
                 try:
                     # Extract image data
                     image_data = row[image_col]
                     image_bytes = self.extract_image_from_row(image_data)
-                    
+
                     if image_bytes is None:
                         print(f"⚠ Failed to extract image from row {row_idx}")
                         continue
-                    
+
                     # Convert to tensor
-                    tensor = self.image_to_tensor(image_bytes, tensor_config)
+                    tensor = self.image_to_tensor(image_bytes, tensor_config, device=device)
                     tensors.append(tensor)
-                    
+
                     # Create metadata
                     metadata = {
                         "dataset": parquet_path.parent.name,
@@ -358,7 +385,7 @@ class ExtractImageProcessor:
                         "tensor_dtype": str(tensor.dtype),
                         "extraction_time": datetime.now().isoformat(),
                     }
-                    
+
                     # Add other columns as metadata
                     for col in row.index:
                         if col != image_col:
@@ -368,69 +395,34 @@ class ExtractImageProcessor:
                                 metadata[col] = row[col]
                             except (TypeError, OverflowError):
                                 metadata[col] = str(row[col])
-                    
+
                     metadata_list.append(metadata)
-                    
+
                     if (idx + 1) % 10 == 0:
                         print(f"  Processed {idx + 1}/{sample_size} images")
-                    
+
                 except Exception as e:
                     print(f"⚠ Failed to process row {row_idx}: {e}")
                     continue
-            
+
             print(f"✓ Successfully extracted {len(tensors)} images to tensors")
-            
+
             # Save metadata if requested
             if save_metadata and metadata_list:
-                metadata_path = parquet_path.parent / f"{parquet_path.stem}_metadata.json"
-                with open(metadata_path, 'w', encoding='utf-8') as f:
-                    json.dump(metadata_list, f, indent=2, ensure_ascii=False, default=str)
+                metadata_path = (
+                    parquet_path.parent / f"{parquet_path.stem}_metadata.json"
+                )
+                with open(metadata_path, "w", encoding="utf-8") as f:
+                    json.dump(
+                        metadata_list, f, indent=2, ensure_ascii=False, default=str
+                    )
                 print(f"✓ Saved metadata to: {metadata_path}")
-            
+
             return tensors, metadata_list
-            
+
         except Exception as e:
             print(f"✗ Error extracting images to tensors: {e}")
             print(traceback.format_exc())
-            raise
-
-    async def process_dataset(
-        self,
-        dataset_path: str,
-        num_images: int = 10,
-        filename: Optional[str] = None,
-        tensor_config: Optional[Dict[str, Any]] = None,
-        save_metadata: bool = True
-    ) -> Tuple[List[torch.Tensor], List[Dict[str, Any]]]:
-        """
-        Complete pipeline: download parquet and extract images to tensors.
-
-        Args:
-            dataset_path: Hugging Face dataset path
-            num_images: Number of images to extract
-            filename: Specific parquet filename to download
-            tensor_config: Configuration for tensor conversion
-            save_metadata: Whether to save metadata
-
-        Returns:
-            Tuple of (list of image tensors, list of metadata dictionaries)
-        """
-        try:
-            # Download parquet file
-            parquet_path = await self.download_parquet_from_hf(dataset_path, filename)
-            
-            # Extract images to tensors
-            tensors, metadata = self.extract_images_to_tensors(
-                parquet_path=parquet_path,
-                num_images=num_images,
-                tensor_config=tensor_config,
-                save_metadata=save_metadata
-            )
-            
-            return tensors, metadata
-            
-        except Exception as e:
-            print(f"✗ Error processing dataset {dataset_path}: {e}")
             raise
 
     async def process_multiple_parquet_files(
@@ -440,7 +432,8 @@ class ExtractImageProcessor:
         max_images_per_file: int = 10000,
         tensor_config: Optional[Dict[str, Any]] = None,
         save_tensors: bool = True,
-        output_filename: Optional[str] = None
+        output_filename: Optional[str] = None,
+        device: torch.device = device,
     ) -> Tuple[List[torch.Tensor], List[Dict[str, Any]]]:
         """
         Process multiple parquet files to extract a total number of images.
@@ -460,38 +453,38 @@ class ExtractImageProcessor:
             # List all available parquet files
             parquet_files = self.list_parquet_files(dataset_path)
             print(f"Found {len(parquet_files)} parquet files in {dataset_path}")
-            
+
             all_tensors = []
             all_metadata = []
             processed_files = 0
-            
+
             # Shuffle parquet files for random selection
             random.shuffle(parquet_files)
 
             seen_hashes = set()
-            
+
             for filename in parquet_files:
                 if len(all_tensors) >= total_images:
                     break
-                    
                 try:
-                    print(f"\n📁 Processing file {processed_files + 1}/{len(parquet_files)}: {filename}")
-                    
+                    print(
+                        f"\n📁 Processing file {processed_files + 1}/{len(parquet_files)}: {filename}"
+                    )
                     # Calculate how many images to extract from this file
                     remaining_images = total_images - len(all_tensors)
                     images_to_extract = min(max_images_per_file, remaining_images)
-                    
                     # Download and process this parquet file
-                    parquet_path = await self.download_parquet_from_hf(dataset_path, filename)
-                    
+                    parquet_path = await self.download_parquet_from_hf(
+                        dataset_path, filename
+                    )
                     # Extract images from this file
                     tensors, metadata = self.extract_images_to_tensors(
                         parquet_path=parquet_path,
                         num_images=images_to_extract,
                         tensor_config=tensor_config,
-                        save_metadata=False  # We'll save combined metadata later
+                        save_metadata=False,  # We'll save combined metadata later
+                        device=device,
                     )
-                    
                     for i, tensor in enumerate(tensors):
                         image_hash = hash_image_bytes(tensor.numpy().tobytes())
                         if image_hash in seen_hashes:
@@ -499,16 +492,17 @@ class ExtractImageProcessor:
                         seen_hashes.add(image_hash)
                         all_tensors.append(tensor)
                         all_metadata.append(metadata[i])
-                    
                     processed_files += 1
                     print(f"✓ Extracted {len(tensors)} images from {filename}")
-                    print(f"📊 Total images collected: {len(all_tensors)}/{total_images}")
-                    
+                    print(
+                        f"📊 Total images collected: {len(all_tensors)}/{total_images}"
+                    )
                 except Exception as e:
                     print(f"⚠ Failed to process {filename}: {e}")
                     continue
-            
-            print(f"\n✅ Successfully extracted {len(all_tensors)} images from {processed_files} parquet files")
+            print(
+                f"\n✅ Successfully extracted {len(all_tensors)} images from {processed_files} parquet files"
+            )
             if all_tensors:
                 print(all_tensors[0].shape)
             else:
@@ -517,12 +511,15 @@ class ExtractImageProcessor:
             if save_tensors and all_tensors:
                 import os
                 import json as _json
+
                 if output_filename is None:
                     dataset_name = dataset_path.split("/")[-1]
                     output_filename = f"{dataset_name}_{len(all_tensors)}images"
-                
+
                 # Stack all tensors into a single tensor
                 stacked_tensors = torch.stack(all_tensors, dim=0)
+                # Move to CPU before saving
+                stacked_tensors = stacked_tensors.cpu()
                 output_path = self.output_dir / f"{output_filename}.pt"
                 metadata_path = self.output_dir / f"{output_filename}_metadata.json"
 
@@ -530,10 +527,12 @@ class ExtractImageProcessor:
                 if os.path.exists(output_path):
                     print(f"Appending to existing tensor file: {output_path}")
                     existing_tensors = torch.load(output_path, weights_only=True)
-                    stacked_tensors = torch.cat([existing_tensors, stacked_tensors], dim=0)
+                    stacked_tensors = torch.cat(
+                        [existing_tensors, stacked_tensors], dim=0
+                    )
                 if os.path.exists(metadata_path):
                     print(f"Appending to existing metadata file: {metadata_path}")
-                    with open(metadata_path, 'r', encoding='utf-8') as f:
+                    with open(metadata_path, "r", encoding="utf-8") as f:
                         existing_metadata = _json.load(f)
                     all_metadata = existing_metadata + all_metadata
 
@@ -542,20 +541,22 @@ class ExtractImageProcessor:
                 print(f"✓ Saved tensors to: {output_path}")
                 print(f"📊 Tensor shape: {stacked_tensors.shape}")
                 print(f"📊 Tensor dtype: {stacked_tensors.dtype}")
-                
+
                 # Save metadata
-                with open(metadata_path, 'w', encoding='utf-8') as f:
-                    _json.dump(all_metadata, f, indent=2, ensure_ascii=False, default=str)
+                with open(metadata_path, "w", encoding="utf-8") as f:
+                    _json.dump(
+                        all_metadata, f, indent=2, ensure_ascii=False, default=str
+                    )
                 print(f"✓ Saved metadata to: {metadata_path}")
-            
+
             return all_tensors, all_metadata
-            
+
         except Exception as e:
             print(f"✗ Error processing multiple parquet files: {e}")
             print(traceback.format_exc())
             raise
 
-    def get_tensor_stats(self, tensors: List[torch.Tensor]) -> Dict[str, Any]:
+    def get_tensor_stats(self, tensors: List[torch.Tensor], device: torch.device = device) -> Dict[str, Any]:
         """
         Get statistics about a list of tensors.
 
@@ -567,10 +568,10 @@ class ExtractImageProcessor:
         """
         if not tensors:
             return {}
-        
+
         # Stack all tensors for analysis
-        stacked = torch.stack(tensors, dim=0)
-        
+        stacked = torch.stack(tensors, dim=0).to(device)
+
         stats = {
             "count": len(tensors),
             "shapes": [list(t.shape) for t in tensors],
@@ -580,15 +581,15 @@ class ExtractImageProcessor:
             "mean_value": float(torch.mean(stacked)),
             "std_value": float(torch.std(stacked)),
         }
-        
+
         return stats
 
 
 def create_tensor_config(
     dtype: torch.dtype = torch.float32,
-    normalize: bool = True,
+    normalize: bool = False,
     channels_first: bool = True,
-    resize: Optional[Tuple[int, int]] = None
+    resize: Optional[Tuple[int, int]] = None,
 ) -> Dict[str, Any]:
     """
     Create a tensor configuration dictionary.
@@ -616,15 +617,15 @@ async def main():
     print("Extract Image Dataset Processor Example")
     print("Downloading 10,000 images from Hugging Face parquets")
     print("=" * 60)
-    
+
     if not HF_AVAILABLE:
         print("\n❌ huggingface_hub is required to run this example.")
         print("Install it with: pip install huggingface_hub")
         return
-    
+
     # Initialize processor
     processor = ExtractImageProcessor()
-    
+
     # Train dataset path (change as needed)
     # dataset_path = "bitmind/bm-real"  # Real
     dataset_path = "bitmind/celeb-a-hq"  # Real
@@ -633,21 +634,21 @@ async def main():
     # dataset_path = "bitmind/face-swap"  # Semi-Synthetic
     # dataset_path = "bitmind/idoc-mugshots-images"  # Real
     # dataset_path = "bitmind/JourneyDB"  # Synthetic
-    
+
     # Test dataset path (change as needed)
 
     try:
         print(f"\n📥 Processing dataset: {dataset_path}")
         print("🎯 Target: 10,000 images from Hugging Face parquets")
-        
+
         # Create tensor configuration
         tensor_config = create_tensor_config(
             dtype=torch.float32,
-            normalize=True,
+            normalize=False,
             channels_first=True,
-            resize=(256, 256)  # Resize all images to 256x256 for consistency
+            resize=(256, 256),  # Resize all images to 256x256 for consistency
         )
-        
+
         output_filename = "bm_train_images"
         # Process multiple parquet files to get 10,000 images
         tensors, metadata = await processor.process_multiple_parquet_files(
@@ -656,17 +657,22 @@ async def main():
             max_images_per_file=10000,  # Extract up to 10000 images per parquet file for efficiency
             tensor_config=tensor_config,
             save_tensors=True,
-            output_filename=output_filename
+            output_filename=output_filename,
+            device=device,
         )
-        
+
         print(f"\n✅ Success! Extracted {len(tensors)} images")
         print(f"💾 Tensors saved to: {output_filename}.pt in current directory")
-        print(f"📋 Metadata saved to: {output_filename}_metadata.json in current directory")
-        
+        print(
+            f"📋 Metadata saved to: {output_filename}_metadata.json in current directory"
+        )
+
     except Exception as e:
         print(f"\n❌ Error: {e}")
         import traceback
+
         traceback.print_exc()
+
 
 if __name__ == "__main__":
     asyncio.run(main())

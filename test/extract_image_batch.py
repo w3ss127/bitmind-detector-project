@@ -1,36 +1,29 @@
-import asyncio
+import os
 from pathlib import Path
 from PIL import Image
 import torch
-import os
-import re
-from io import BytesIO
 import numpy as np
-import warnings
+from io import BytesIO
+import re
+import asyncio
 import sys
-from pathlib import Path
-sys.path.append(str(Path(__file__).resolve().parent.parent))
+from pathlib import Path as SysPath
+sys.path.append(str(SysPath(__file__).resolve().parent.parent))
 
-# Import ExtractImageProcessor from test/extract_image_tensors.py
 from extract_image_tensors import ExtractImageProcessor
 
-# Import GenerationPipeline and ModelTask from bitmind/generation
-from bitmind.generation.generation_pipeline import GenerationPipeline
-from bitmind.types import ModelTask
-
-warnings.filterwarnings("ignore", message="The config attributes.*were passed to UNet2DConditionModel.*")
-
-# Settings
-DATASET_PATH = "bitmind/bm-real"
+# Real: bm-real, MS-COCO-unique-256, open-image-v7-256, celeb-a-hq, dtd, caltech-101
+# Synthetic: bm-aura-imagegen, GenImage_MidJourney, JourneyDB
+# Semi-Synthetic: face-swap
+DATASET_PATH = "bitmind/JourneyDB"  
 START_FROM = 0  # index to start downloading from
-EXTRACT_COUNT = 25000  # total number of images to extract
+EXTRACT_COUNT = 50000  # total number of images to extract
 BATCH_SIZE = 5000  # number of images per .pt file
-MODEL_NAME = "diffusers/stable-diffusion-xl-1.0-inpainting-0.1"
-OUTPUT_DIR = Path("test/semi_synth_image_batches")
+# DIR: test/real_image_batches, test/synth_image_batches, semi_synth_image_batches
+OUTPUT_DIR = Path("test/synth_image_batches") 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-device_tensor = torch.device(device)
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 async def main():
     processor = ExtractImageProcessor()
@@ -56,7 +49,7 @@ async def main():
             break
         parquet_path = await processor.download_parquet_from_hf(DATASET_PATH, parquet_file)
         df = processor.load_parquet_data(parquet_path)
-        image_col = str(processor.find_image_column(df))
+        image_col = processor.find_image_column(df)
         for idx, row in df.iterrows():
             if rows_seen < START_FROM:
                 rows_seen += 1
@@ -71,26 +64,14 @@ async def main():
                 image = Image.open(BytesIO(image_bytes)).convert('RGB')
             except Exception:
                 continue
-
-            image_array = np.array(image)
-            image_samples = [{"image": image_array, "path": f"row_{rows_seen}"}]
-            pipeline = GenerationPipeline(output_dir=OUTPUT_DIR, device=device)
-            results = pipeline.generate(
-                image_samples=image_samples,
-                tasks=[ModelTask.IMAGE_TO_IMAGE.value],  # Pass as a list
-                model_names=MODEL_NAME
-            )
-            if not results:
-                continue
-
-            if isinstance(results, np.ndarray):
-                image = Image.fromarray(results)
+            # Resize to 256x256
             image = image.resize((256, 256), Image.LANCZOS)
-            tensor = torch.from_numpy(np.array(image)).permute(2, 0, 1).contiguous().to(device_tensor)
+            tensor = torch.from_numpy(np.array(image)).permute(2, 0, 1).contiguous().to(device)
             tensor_batch.append(tensor)
             images_extracted += 1
             if len(tensor_batch) == BATCH_SIZE:
                 save_path = OUTPUT_DIR / f"images_{batch_idx}.pt"
+                # Stack on CUDA, then move to CPU before saving
                 stacked = torch.stack(tensor_batch).cpu()
                 torch.save(stacked, save_path)
                 print(f"Saved {len(tensor_batch)} tensors to {save_path}")

@@ -240,7 +240,16 @@ class GenerationPipeline:
                             if k not in (modality, "source_image", "mask_image")
                         }
                     )
-                    save_paths.append(self._save_media_and_metadata(gen_output))
+                    # save_paths.append(self._save_media_and_metadata(gen_output))
+                    # Convert image into tensor
+                    img = None
+                    if hasattr(gen_output[modality], "images") and gen_output[modality].images:
+                        img = gen_output[modality].images[0]
+                    elif isinstance(gen_output[modality], Image.Image):
+                        img = gen_output[modality]
+                    else:
+                        img = gen_output[modality]
+                    save_paths.append(np.array(img))
                     stats[model_name]["success"] += 1
                 except Exception as e:
                     bt.logging.error(f"Failed to either generate or save media: {e}")
