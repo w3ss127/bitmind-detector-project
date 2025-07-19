@@ -243,12 +243,13 @@ class GenerationPipeline:
                     # save_paths.append(self._save_media_and_metadata(gen_output))
                     # Convert image into tensor
                     img = None
-                    if hasattr(gen_output[modality], "images") and gen_output[modality].images:
-                        img = gen_output[modality].images[0]
-                    elif isinstance(gen_output[modality], Image.Image):
-                        img = gen_output[modality]
+                    modality_output = gen_output["modality"]
+                    if hasattr(gen_output[modality_output], "images") and gen_output[modality_output].images:
+                        img = gen_output[modality_output].images[0]
+                    elif isinstance(gen_output[modality_output], Image.Image):
+                        img = gen_output[modality_output]
                     else:
-                        img = gen_output[modality]
+                        img = gen_output[modality_output]
                     save_paths.append(np.array(img))
                     stats[model_name]["success"] += 1
                 except Exception as e:

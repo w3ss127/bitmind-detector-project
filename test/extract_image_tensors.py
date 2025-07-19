@@ -587,7 +587,7 @@ class ExtractImageProcessor:
 
 def create_tensor_config(
     dtype: torch.dtype = torch.float32,
-    normalize: bool = False,
+    normalize: bool = True,
     channels_first: bool = True,
     resize: Optional[Tuple[int, int]] = None,
 ) -> Dict[str, Any]:
@@ -644,7 +644,7 @@ async def main():
         # Create tensor configuration
         tensor_config = create_tensor_config(
             dtype=torch.float32,
-            normalize=False,
+            normalize=True,
             channels_first=True,
             resize=(256, 256),  # Resize all images to 256x256 for consistency
         )

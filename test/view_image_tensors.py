@@ -6,6 +6,8 @@ import torch
 import numpy as np
 from pathlib import Path
 
+OUTPUT_DIR = Path('test')
+
 # Optional imports with graceful fallback
 try:
     import matplotlib.pyplot as plt
@@ -43,8 +45,9 @@ def load_and_view_tensors(tensor_path: str, num_images: int = 5):
     print(f"📈 Statistics:")
     print(f"   Min value: {torch.min(tensors):.4f}")
     print(f"   Max value: {torch.max(tensors):.4f}")
-    print(f"   Mean value: {torch.mean(tensors):.4f}")
-    print(f"   Std value: {torch.std(tensors):.4f}")
+    tensors_float = tensors.float()
+    print(f"   Mean value: {torch.mean(tensors_float):.4f}")
+    print(f"   Std value: {torch.std(tensors_float):.4f}")
     
     # Display some images
     if num_images > 0 and MATPLOTLIB_AVAILABLE:
@@ -115,9 +118,9 @@ def main():
     print("=" * 50)
     print("Tensor Viewer - Load and View .pt Files")
     print("=" * 50)
-    
+
     # Look for tensor files in current directory
-    tensor_files = list(Path(".").glob("*.pt"))
+    tensor_files = list(OUTPUT_DIR.glob("*.pt"))
     
     if not tensor_files:
         print("❌ No .pt files found in current directory")

@@ -65,9 +65,9 @@ class DetectionMiner(BaseMiner):
             image_array = np.array(Image.open(io.BytesIO(image_data)))
             # Convert to (C, H, W) format for the detector
             image_tensor = torch.from_numpy(image_array).permute(2, 0, 1)
-            bt.logging.error(image_tensor.shape)
-            bt.logging.error(image_tensor[0].dtype)
-            # bt.logging.error(image_tensor)
+            bt.logging.info(image_tensor.shape)
+            bt.logging.info(image_tensor[0].dtype)
+            
             ### PREDICT - using the updated Detector class with resnet model
             pred = self.detector.detect(image_tensor, "image")
             bt.logging.success(pred)
@@ -137,7 +137,8 @@ class DetectionMiner(BaseMiner):
                     video_tensor = torch.permute(
                         torch.from_numpy(video_array), (3, 0, 1, 2)  # (C, T, H, W)
                     )
-
+                    bt.logging.info(video_tensor.shape)
+                    bt.logging.info(video_tensor[0].dtype)
             ### PREDICT - using the updated Detector class with resnet model
             pred = self.detector.detect(video_tensor, "video")
             bt.logging.success(pred)

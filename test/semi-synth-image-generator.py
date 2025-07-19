@@ -23,7 +23,7 @@ warnings.filterwarnings("ignore", message="The config attributes.*were passed to
 # Settings
 DATASET_PATH = "bitmind/bm-real"
 START_FROM = 0  # index to start downloading from
-EXTRACT_COUNT = 25000  # total number of images to extract
+EXTRACT_COUNT = 2  # total number of images to extract
 BATCH_SIZE = 5000  # number of images per .pt file
 MODEL_NAME = "diffusers/stable-diffusion-xl-1.0-inpainting-0.1"
 OUTPUT_DIR = Path("test/semi_synth_image_batches")
