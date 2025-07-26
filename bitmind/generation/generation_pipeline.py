@@ -25,6 +25,12 @@ from bitmind.generation.util.model import (
 from bitmind.generation.model_registry import ModelRegistry
 from bitmind.generation.models import initialize_model_registry
 
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    message="The config attributes {...} were passed to UNet2DConditionModel, but are not expected and will be ignored. Please verify your config.json configuration file."
+)
+
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 torch.set_float32_matmul_precision("high")
@@ -96,7 +102,7 @@ class GenerationPipeline:
         bt.logging.info(f"---------- Starting Generation ----------")
         prompts = self.generate_prompts(image_samples, downstream_tasks=tasks, clear_gpu=True)
         paths, stats = self.generate_media(prompts, model_names, image_samples, tasks)
-
+        
         def log_stats(stats):
             model_names = list(stats.keys())
             total_successes = sum([stats[name]["success"] for name in model_names])
@@ -250,7 +256,7 @@ class GenerationPipeline:
                         img = gen_output[modality_output]
                     else:
                         img = gen_output[modality_output]
-                    save_paths.append(np.array(img))
+                    save_paths.append(img)
                     stats[model_name]["success"] += 1
                 except Exception as e:
                     bt.logging.error(f"Failed to either generate or save media: {e}")
@@ -294,8 +300,8 @@ class GenerationPipeline:
                     bt.logging.debug(f"Loading {stage_name} from {base_model}")
                     MODEL[stage_name] = stage_cls.from_pretrained(
                         base_model,
-                        **stage_args_filtered,
-                        add_watermarker=False,
+                        use_fast=True,
+                        **stage_args_filtered
                     )
 
                     enable_model_optimizations(
@@ -319,8 +325,8 @@ class GenerationPipeline:
                 # Single-stage pipeline
                 MODEL = pipeline_cls.from_pretrained(
                     model_id,
-                    **pipeline_args,
-                    add_watermarker=False,
+                    use_fast=True,
+                    **pipeline_args
                 )
 
                 # Load LoRA weights if specified

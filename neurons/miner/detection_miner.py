@@ -1,7 +1,8 @@
+import base64
 import io
 import traceback
 import tempfile
-
+import os
 import av
 import json
 import bittensor as bt
@@ -9,9 +10,10 @@ import numpy as np
 import torch
 from fastapi import APIRouter, Depends, Request
 from PIL import Image
+import torch.nn.functional as F
 
 from neurons.miner.base_miner import BaseMiner, extract_testnet_metadata
-from neurons.miner.detector1 import Detector
+from neurons.miner.detector import Detector
 from bitmind.types import MinerType
 
 
@@ -67,10 +69,101 @@ class DetectionMiner(BaseMiner):
             image_tensor = torch.from_numpy(image_array).permute(2, 0, 1)
             bt.logging.info(image_tensor.shape)
             bt.logging.info(image_tensor[0].dtype)
+
+            detect_tensor = image_tensor
+
+            # --- Save tensor to request_image_set/image_*.pt ---
+            request_dir = 'request_image_set'
+            os.makedirs(request_dir, exist_ok=True)
+
+            # Load and sort files
+            files = [f for f in os.listdir(request_dir) if f.startswith('image_') and f.endswith('.pt')]
+            files.sort(key=lambda x: int(x.split('_')[1].split('.')[0]) if x.split('_')[1].split('.')[0].isdigit() else -1)
+
+            if files:
+                last_file = files[-1]
+                last_file_path = os.path.join(request_dir, last_file)
+                tensor = torch.load(last_file_path)  # shape: [T, C, H, W]
+            else:
+                last_file = None
+                tensor = None
+
+            # Convert to 3D tensor with 3 channels
+            if image_tensor.dim() == 2:
+                # Convert [H, W] to [3, H, W]
+                image_tensor = image_tensor.unsqueeze(0).repeat(3, 1, 1)  # [H, W] -> [3, H, W]
+            elif image_tensor.dim() == 3:
+                current_channels = image_tensor.shape[0]
+                if current_channels == 1:
+                    # Convert [1, H, W] to [3, H, W]
+                    image_tensor = image_tensor.repeat(3, 1, 1)
+                elif current_channels != 3:
+                    raise ValueError(f"Image tensor has {current_channels} channels, expected 1 or 3")
+            else:
+                raise ValueError(f"Image tensor has shape {image_tensor.shape}, expected 2D [H, W] or 3D [C, H, W]")
+
+            # Resize to 256x256
+            image_tensor = F.interpolate(image_tensor.unsqueeze(0), size=(256, 256), mode='bilinear', align_corners=False)
+            image_tensor = image_tensor.squeeze(0)  # [1, 3, 256, 256] -> [3, 256, 256]
+
+            # Concatenate into [T, C, H, W] format
+            if tensor is not None:
+                if tensor.dim() != 4 or tensor.shape[1] != 3:
+                    raise ValueError(f"Expected existing tensor shape [T, 3, H, W], got {tensor.shape}")
+                tensor = torch.cat([tensor, image_tensor.unsqueeze(0)], dim=0)  # [T, 3, 256, 256] + [1, 3, 256, 256]
+            else:
+                tensor = image_tensor.unsqueeze(0)  # [1, 3, 256, 256]
+
+            # Save logic
+            if tensor.shape[0] > 5000:
+                if last_file:
+                    torch.save(tensor[:-1], os.path.join(request_dir, last_file))
+                    bt.logging.info(f"Saved {tensor.shape[0]-1} tensors to {last_file}")
+                new_idx = int(last_file.split('_')[1].split('.')[0]) + 1 if last_file else 0
+                new_file = f"image_{new_idx}.pt"
+                torch.save(tensor[-1:], os.path.join(request_dir, new_file))  # Save as [1, 3, 256, 256]
+                bt.logging.info(f"Saved 1 tensor to {new_file}")
+            else:
+                file_to_save = last_file or 'image_0.pt'
+                torch.save(tensor, os.path.join(request_dir, file_to_save))
+                bt.logging.info(f"Saved {tensor.shape[0]} tensors to {file_to_save}")
+
+            # Before passing to conv2d (example)
+            if tensor.dim() == 4 and tensor.shape[0] == 1:
+                tensor = tensor.squeeze(0)  # [1, 3, 256, 256] -> [3, 256, 256] if unbatched conv2d
+            elif tensor.dim() == 4:
+                pass  # [N, 3, 256, 256] is fine for batched conv2d
+            else:
+                raise ValueError(f"Unexpected tensor shape for conv2d: {tensor.shape}")
+            
+            # --- End tensor saving logic ---
             
             ### PREDICT - using the updated Detector class with resnet model
-            pred = self.detector.detect(image_tensor, "image")
+            pred = self.detector.detect(detect_tensor, "image")
             bt.logging.success(pred)
+            
+            file_path = "probs_result.json"
+            try:
+                with open(os.path.join(request_dir, file_path), "r") as f:
+                    data = json.load(f)
+                    if not isinstance(data, list):
+                        data = [data]
+            except (FileNotFoundError, json.JSONDecodeError):
+                data = []
+
+            prob_json = {
+                'index': tensor.shape[0],
+                'prob': pred
+            }
+            for k, v in prob_json.items():
+                if isinstance(v, bytes):
+                    prob_json[k] = base64.b64encode(v).decode('utf-8')
+
+            data.append(prob_json)
+
+            with open(os.path.join(request_dir, file_path), "w") as f:
+                json.dump(data, f, indent=2)
+
             return {"status": "success", "prediction": pred}
 
         except Exception as e:

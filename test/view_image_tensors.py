@@ -6,7 +6,11 @@ import torch
 import numpy as np
 from pathlib import Path
 
-OUTPUT_DIR = Path('test')
+# ==== Static configuration ====
+TENSOR_FILE = 'test/semi_synth_image_batches/images_1.pt'  # Path to .pt tensor file
+START_INDEX = 3000  # Start index of tensor to extract
+COUNT = 20       # Number of tensors to extract
+OUTPUT_DIR = 'test/extracted_images'  # Directory to save images
 
 # Optional imports with graceful fallback
 try:
@@ -115,44 +119,31 @@ def save_individual_images(tensors, output_dir: str = "extracted_images"):
 
 def main():
     """Main function to demonstrate tensor loading and viewing."""
-    print("=" * 50)
-    print("Tensor Viewer - Load and View .pt Files")
-    print("=" * 50)
+    import torch
+    import os
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    tensors = torch.load(TENSOR_FILE)
 
-    # Look for tensor files in current directory
-    tensor_files = list(OUTPUT_DIR.glob("*.pt"))
+    print(f"✅ Loaded tensors successfully!")
+    print(f"📊 Tensor shape: {tensors.shape}")
+    print(f"📊 Tensor dtype: {tensors.dtype}")
+    print(f"📊 Number of images: {tensors.shape[0]}")
     
-    if not tensor_files:
-        print("❌ No .pt files found in current directory")
-        print("Make sure you've run extract_image_tensors.py first")
-        return
-    
-    print(f"Found {len(tensor_files)} tensor file(s):")
-    for i, file in enumerate(tensor_files):
-        print(f"  {i+1}. {file}")
-    
-    # Load the first tensor file
-    tensor_path = tensor_files[0]
-    print(f"\n📥 Loading: {tensor_path}")
-    
-    try:
-        # Load and view tensors
-        tensors = load_and_view_tensors(str(tensor_path), num_images=5)
-        
-        # Ask if user wants to save individual images
-        response = input("\n💾 Save individual images? (y/n): ").lower().strip()
-        if response in ['y', 'yes']:
-            save_individual_images(tensors)
-        
-        print(f"\n✅ Done! You can now work with the tensors in your code.")
-        print(f"📖 Example usage:")
-        print(f"   tensors = torch.load('{tensor_path}')")
-        print(f"   first_image = tensors[0]  # Shape: {tensors[0].shape}")
-        
-    except Exception as e:
-        print(f"❌ Error loading tensors: {e}")
-        import traceback
-        traceback.print_exc()
+    # Get tensor statistics
+    print(f"📈 Statistics:")
+    print(f"   Min value: {torch.min(tensors):.4f}")
+    print(f"   Max value: {torch.max(tensors):.4f}")
+    tensors_float = tensors.float()
+    print(f"   Mean value: {torch.mean(tensors_float):.4f}")
+    print(f"   Std value: {torch.std(tensors_float):.4f}")
+
+    end_index = min(START_INDEX + COUNT, tensors.shape[0])
+    for i in range(START_INDEX, end_index):
+        tensor = tensors[i]
+        image = tensor.permute(1, 2, 0).numpy().astype('uint8')
+        img = Image.fromarray(image)
+        img.save(os.path.join(OUTPUT_DIR, f"image_{i}.png"))
+        print(f"Saved image_{i}.png")
 
 if __name__ == "__main__":
     main() 

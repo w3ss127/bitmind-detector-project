@@ -1,148 +1,107 @@
-import json
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import bittensor as bt
+from torchvision import transforms
 import os
-from torchvision import transforms, models
-from PIL import Image
+import timm
 
-class ResNetDeepfakeDetector(nn.Module):
-    def __init__(self, num_classes=3, model_name='resnet50'):
+class ResNetViTHybrid(nn.Module):
+    def __init__(self, num_classes: int):
         super().__init__()
-        # --- Define ResNetCustomTop at the top level so torch.load can find it ---
-        backbone = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
-        backbone_out_channels = backbone.fc.in_features
-        backbone = nn.Sequential(*list(backbone.children())[:-2])  # remove last FC and pool
+        self.resnet = timm.create_model("resnet50", pretrained=True, num_classes=0)
+        self.vit = timm.create_model("vit_base_patch16_224", pretrained=True, num_classes=0)
+        self.fc1 = nn.Linear(self.resnet.num_features + self.vit.num_features, 512)
+        self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(0.5)
+        self.fc2 = nn.Linear(512, num_classes)
 
-        self.backbone = backbone
-        self.norm = nn.BatchNorm2d(backbone_out_channels)
-        self.pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.classifier = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(backbone_out_channels, 512),
-            nn.BatchNorm1d(512),
-            nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(512, num_classes)
-        )
-    def forward(self, x):
-        x = self.backbone(x)
-        x = self.norm(x)
-        x = self.pool(x)
-        x = self.classifier(x)
-        return x
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        resnet_features = self.resnet(x)
+        vit_features = self.vit(x)
+        combined = torch.cat((resnet_features, vit_features), dim=1)
+        out = self.relu(self.fc1(combined))
+        out = self.dropout(out)
+        return self.fc2(out)
 
 class Detector:
-    """Handler for image and video detection models."""
-    def __init__(self, config, model_path=None):
-        bt.logging(config=config, logging_dir=config.neuron.full_path)
-        bt.logging.set_info()
-        if config.logging.debug:
-            bt.logging.set_debug(True)
-        if config.logging.trace:
-            bt.logging.set_trace(True)
 
-        self.config = config
-        self.image_detector = None
-        self.video_detector = None
-        self.device = (
-            self.config.device
-            if hasattr(self.config, "device")
-            else "cuda" if torch.cuda.is_available() else "cpu"
-        )
-        # Allow custom model path
-        if model_path is not None:
-            self.model_path = model_path
-        else:
-            self.model_path = os.path.join(os.path.dirname(__file__), "bitmind.pth")
+    def __init__(self, model_path: str = None, device: str | None = None):
+        # Set device
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
 
-    def load_model(self, modality=None):
-        bt.logging.info(f"Loading {modality} detection model from: {self.model_path}")
+        # Set model path
+        self.model_path = os.path.join(os.path.dirname(__file__), "best_model_60000_2.pt")
+        if not os.path.exists(self.model_path):
+            raise FileNotFoundError(f"Model file not found: {self.model_path}")
 
-        assert os.path.exists(self.model_path), "❌ Model weights not found!"
-    
-        model = ResNetDeepfakeDetector(num_classes=3).to(self.device)
-        model.load_state_dict(torch.load(self.model_path, map_location=self.device))
-        model.eval()
+        # Initialize model and load weights
+        self.model = ResNetViTHybrid(num_classes=3).to(self.device)
+        checkpoint = torch.load(self.model_path, map_location=self.device)
+        state_dict = checkpoint.get("model_state_dict", checkpoint)
+        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+        self.model.load_state_dict(state_dict)
+        print(f"Loaded model from {self.model_path}")
 
-        if modality in ("image", None):
-            try:
-                self.image_detector = model
-                bt.logging.info("✅ Image detector loaded successfully!")
-            except Exception as e:
-                bt.logging.error(f"❌ Error loading image model: {e}")
-                raise
-        if modality in ("video", None):
-            try:
-                self.video_detector = model
-                bt.logging.info("✅ Video detector loaded successfully!")
-            except Exception as e:
-                bt.logging.error(f"❌ Error loading video model: {e}")
-                raise
+        # Define preprocessing pipeline
+        self.transforms = transforms.Compose([
+            transforms.Lambda(lambda x: x / 255.0 if x.max() > 1.0 else x),  # Normalize if in [0, 255]
+            transforms.Resize((224, 224), interpolation=transforms.InterpolationMode.BILINEAR),
+            transforms.Lambda(lambda x: x.repeat(3, 1, 1) if x.shape[0] == 1 else x),  # Convert grayscale to RGB
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
 
-    def preprocess_image(self, image_tensor):
-        if image_tensor.dim() == 3 and image_tensor.shape[0] == 1:
-            image_tensor = image_tensor.repeat(3, 1, 1)
-        if image_tensor.dim() == 3 and image_tensor.shape[0] == 3:
-            image_tensor = image_tensor.unsqueeze(0)
-        elif image_tensor.dim() == 4 and image_tensor.shape[1] == 3:
-            pass  # already [1, 3, H, W]
-        else:
-            raise ValueError(f"Unsupported image shape: {image_tensor.shape}")
+    def detect(self, media_tensor: torch.Tensor, modality: str = "image") -> list[float]:
+        media_tensor = media_tensor.to(self.device)  # Move to device
+        valid_modalities = ["image", "video"]
 
-        image_tensor = image_tensor.float() / 255.0
-        image_tensor = F.interpolate(image_tensor, size=(224, 224), mode='bilinear', align_corners=False)
-        bt.logging.error("image_tensor.shape:",image_tensor.shape)
-        return image_tensor.to(self.device)
+        if modality not in valid_modalities:
+            raise ValueError(f"Modality must be one of {valid_modalities}, got '{modality}'")
 
-
-    def preprocess_video(self, video_tensor):
-        frames = []
-        for t in range(video_tensor.shape[1]):
-            frame = video_tensor[:, t, :, :]
-            processed_frame = self.preprocess_image(frame)
-            frames.append(processed_frame)
-        return torch.cat(frames, dim=0)
-
-    def preprocess(self, media_tensor, modality):
-        bt.logging.debug({
-            "modality": modality,
-            "shape": tuple(media_tensor.shape),
-            "dtype": str(media_tensor.dtype),
-            "min": torch.min(media_tensor).item(),
-            "max": torch.max(media_tensor).item(),
-        })
         if modality == "image":
-            return self.preprocess_image(media_tensor)
-        elif modality == "video":
-            return self.preprocess_video(media_tensor)
-        else:
-            raise ValueError(f"Unsupported modality: {modality}")
+            # Validate image tensor shape
+            if media_tensor.dim() not in [3, 4]:
+                raise ValueError(f"Expected image tensor of shape [C, H, W] or [1, C, H, W], got shape {media_tensor.shape}")
+            if media_tensor.dim() == 4:
+                if media_tensor.shape[0] != 1:
+                    raise ValueError(f"Expected batch size 1 for image tensor, got shape {media_tensor.shape}")
+                media_tensor = media_tensor.squeeze(0)  # [1, C, H, W] -> [C, H, W]
+            if media_tensor.shape[0] not in [1, 3]:
+                raise ValueError(f"Expected 1 or 3 channels for image tensor, got shape {media_tensor.shape}")
 
-    def detect(self, media_tensor, modality):
-        media_tensor = self.preprocess(media_tensor, modality)
-        if modality == "image":
-            if self.image_detector is None:
-                self.load_model("image")
-                
-            if self.image_detector is None:
-                raise RuntimeError("Image detector model is not loaded.")
-            
-            
-        elif modality == "video":
-            if self.video_detector is None:
-                self.load_model("video")
-            if self.video_detector is None:
-                raise RuntimeError("Video detector model is not loaded.")
-            frame_predictions = []
+            # Apply preprocessing
+            try:
+                media_tensor = self.transforms(media_tensor)
+            except (RuntimeError, TypeError) as e:
+                raise ValueError(f"Error preprocessing image: {e}")
+
+            media_tensor = media_tensor.unsqueeze(0)  # [C, H, W] -> [1, C, H, W]
             with torch.no_grad():
-                for i in range(media_tensor.shape[0]):
-                    frame = media_tensor[i:i+1]
-                    outputs = self.video_detector(frame)
-                    probs = F.softmax(outputs, dim=1)
-                    frame_predictions.append(probs[0])
-                probs = torch.stack(frame_predictions).mean(dim=0)
-            return probs
-        else:
-            raise ValueError(f"Unsupported modality: {modality}")
+                self.model.eval()  # Set evaluation mode
+                probs = F.softmax(self.model(media_tensor), dim=1)
+            return probs.squeeze().cpu().tolist()
+
+        # Video modality
+        if media_tensor.dim() != 4:
+            raise ValueError(f"Expected video tensor of shape [C, T, H, W] or [T, C, H, W], got shape {media_tensor.shape}")
+
+        # Handle [C, T, H, W] or [T, C, H, W]
+        if media_tensor.shape[0] in [1, 3]:
+            media_tensor = media_tensor.permute(1, 0, 2, 3)  # [C, T, H, W] -> [T, C, H, W]
+        elif media_tensor.shape[1] not in [1, 3]:
+            raise ValueError(f"Expected video tensor with 1 or 3 channels, got shape {media_tensor.shape}")
+
+        frame_probs = []
+        with torch.no_grad():
+            self.model.eval()  # Set evaluation mode
+            for frame in media_tensor:  # frame: [C, H, W]
+                if frame.shape[0] not in [1, 3]:
+                    raise ValueError(f"Expected 1 or 3 channels for video frame, got shape {frame.shape}")
+                try:
+                    frame = self.transforms(frame)
+                except (RuntimeError, TypeError) as e:
+                    raise ValueError(f"Error preprocessing video frame: {e}")
+                frame = frame.unsqueeze(0)  # [C, H, W] -> [1, C, H, W]
+                probs = F.softmax(self.model(frame), dim=1)
+                frame_probs.append(probs.squeeze(0))
+        avg_probs = torch.stack(frame_probs).mean(dim=0)
+        return avg_probs.cpu().tolist()
