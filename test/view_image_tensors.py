@@ -7,8 +7,8 @@ import numpy as np
 from pathlib import Path
 
 # ==== Static configuration ====
-TENSOR_FILE = 'test/semi_synth_image_batches/images_1.pt'  # Path to .pt tensor file
-START_INDEX = 3000  # Start index of tensor to extract
+TENSOR_FILE = 'test/real_image_batches/images_3.pt'  # Path to .pt tensor file
+START_INDEX = 0  # Start index of tensor to extract
 COUNT = 20       # Number of tensors to extract
 OUTPUT_DIR = 'test/extracted_images'  # Directory to save images
 
