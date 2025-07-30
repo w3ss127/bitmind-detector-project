@@ -38,7 +38,6 @@ torch.set_float32_matmul_precision("high")
 IMAGE_ANNOTATION_MODEL: str = "Salesforce/blip2-opt-6.7b-coco"
 TEXT_MODERATION_MODEL: str = "unsloth/Meta-Llama-3.1-8B-Instruct-bnb-4bit"
 
-
 class GenerationPipeline:
     """
     A class for generating synthetic images and videos.
