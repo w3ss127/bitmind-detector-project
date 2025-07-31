@@ -71,9 +71,9 @@ warnings.filterwarnings(
 )
 
 # Settings - Optimized for multi-GPU usage
-DATASET_PATH = "bitmind/celeb-a-hq"
+DATASET_PATH = "bitmind/open-images-v7-subset"
 START_FROM = 0
-EXTRACT_COUNT = 20000  # Total images to process
+EXTRACT_COUNT = 10000  # Total images to process
 BATCH_SIZE = 5000   # Images per .pt file
 NUM_GPUS = 8        # Number of GPUs available
 
