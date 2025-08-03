@@ -22,12 +22,12 @@ from extract_image_tensors import ExtractImageProcessor
 # Real: bm-real, MS-COCO-unique-256, open-image-v7-256, celeb-a-hq, dtd, caltech-101
 # Synthetic: bm-aura-imagegen, GenImage_MidJourney, JourneyDB
 # Semi-Synthetic: face-swap
-DATASET_PATH = "bitmind/open-images-v7-subset"
-START_FROM = 100000  # index to start downloading from
-EXTRACT_COUNT = 5000  # total number of images to extract
+DATASET_PATH = "bitmind/JourneyDB"
+START_FROM = 60000  # index to start downloading from
+EXTRACT_COUNT = 40000  # total number of images to extract
 BATCH_SIZE = 5000  # number of images per .pt file
 # DIR: test/real_image_batches, test/synth_image_batches, semi_synth_image_batches
-OUTPUT_DIR = Path("test/real_image_batches") 
+OUTPUT_DIR = Path("test/synth_image_batches") 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 def get_available_gpus():

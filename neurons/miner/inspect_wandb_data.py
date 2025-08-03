@@ -59,8 +59,8 @@ if __name__ == "__main__":
     runs = query_wandb_runs(
         project_name="subnet-34-validator",
         entity_name="bitmindai",
-        start_date="2025-07-10",
-        end_date="2025-07-12",
+        start_date="2025-08-1",
+        end_date="2025-08-2",
     )
 
     print(f"Found {len(runs)} runs")

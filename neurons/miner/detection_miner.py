@@ -102,17 +102,17 @@ class DetectionMiner(BaseMiner):
             else:
                 raise ValueError(f"Image tensor has shape {image_tensor.shape}, expected 2D [H, W] or 3D [C, H, W]")
 
-            # Resize to 256x256
-            image_tensor = F.interpolate(image_tensor.unsqueeze(0), size=(256, 256), mode='bilinear', align_corners=False)
-            image_tensor = image_tensor.squeeze(0)  # [1, 3, 256, 256] -> [3, 256, 256]
+            # Resize to 224x224
+            image_tensor = F.interpolate(image_tensor.unsqueeze(0), size=(224, 224), mode='bilinear', align_corners=False)
+            image_tensor = image_tensor.squeeze(0)  # [1, 3, 224, 224] -> [3, 224, 224]
 
             # Concatenate into [T, C, H, W] format
             if tensor is not None:
                 if tensor.dim() != 4 or tensor.shape[1] != 3:
                     raise ValueError(f"Expected existing tensor shape [T, 3, H, W], got {tensor.shape}")
-                tensor = torch.cat([tensor, image_tensor.unsqueeze(0)], dim=0)  # [T, 3, 256, 256] + [1, 3, 256, 256]
+                tensor = torch.cat([tensor, image_tensor.unsqueeze(0)], dim=0)  # [T, 3, 224, 224] + [1, 3, 224, 224]
             else:
-                tensor = image_tensor.unsqueeze(0)  # [1, 3, 256, 256]
+                tensor = image_tensor.unsqueeze(0)  # [1, 3, 224, 224]
 
             # Save logic
             if tensor.shape[0] > 5000:
@@ -121,7 +121,7 @@ class DetectionMiner(BaseMiner):
                     bt.logging.info(f"Saved {tensor.shape[0]-1} tensors to {last_file}")
                 new_idx = int(last_file.split('_')[1].split('.')[0]) + 1 if last_file else 0
                 new_file = f"image_{new_idx}.pt"
-                torch.save(tensor[-1:], os.path.join(request_dir, new_file))  # Save as [1, 3, 256, 256]
+                torch.save(tensor[-1:], os.path.join(request_dir, new_file))  # Save as [1, 3, 224, 224]
                 bt.logging.info(f"Saved 1 tensor to {new_file}")
             else:
                 file_to_save = last_file or 'image_0.pt'
@@ -130,15 +130,15 @@ class DetectionMiner(BaseMiner):
 
             # Before passing to conv2d (example)
             if tensor.dim() == 4 and tensor.shape[0] == 1:
-                tensor = tensor.squeeze(0)  # [1, 3, 256, 256] -> [3, 256, 256] if unbatched conv2d
+                tensor = tensor.squeeze(0)  # [1, 3, 224, 224] -> [3, 224, 224] if unbatched conv2d
             elif tensor.dim() == 4:
-                pass  # [N, 3, 256, 256] is fine for batched conv2d
+                pass  # [N, 3, 224, 224] is fine for batched conv2d
             else:
                 raise ValueError(f"Unexpected tensor shape for conv2d: {tensor.shape}")
             
             # --- End tensor saving logic ---
             
-            ### PREDICT - using the updated Detector class with resnet model
+            ### PREDICT - using the updated Detector class with ConvNext+VIT model
             pred = self.detector.detect(detect_tensor, "image")
             bt.logging.success(pred)
             
@@ -232,7 +232,7 @@ class DetectionMiner(BaseMiner):
                     )
                     bt.logging.info(video_tensor.shape)
                     bt.logging.info(video_tensor[0].dtype)
-            ### PREDICT - using the updated Detector class with resnet model
+            ### PREDICT - using the updated Detector class with ConvNext+VIT model
             pred = self.detector.detect(video_tensor, "video")
             bt.logging.success(pred)
             return {"status": "success", "prediction": pred}

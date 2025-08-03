@@ -146,6 +146,7 @@ class BaseMiner(BaseNeuron, ABC):
             raise HTTPException(status_code=401, detail="Stake below minimum: {stake}")
 
         body = await request.body()
+        
         err = verify_signature(
             request.headers.get("Epistula-Request-Signature"),
             body,

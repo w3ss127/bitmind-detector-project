@@ -54,7 +54,7 @@ else
     exit 1
 fi
 
-NAME="sn34-$MINER_TYPE"
+NAME="sn34-$MINER_TYPE-254"
 
 # Stop any existing processes
 if pm2 list | grep -q "$NAME"; then
