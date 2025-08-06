@@ -13,7 +13,7 @@ from PIL import Image
 import torch.nn.functional as F
 
 from neurons.miner.base_miner import BaseMiner, extract_testnet_metadata
-from neurons.miner.detector import Detector
+from neurons.miner.detector_gan import Detector
 from bitmind.types import MinerType
 
 
